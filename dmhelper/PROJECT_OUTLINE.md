@@ -1,0 +1,137 @@
+Dungeon Master’s AI Companion – Project Outline
+==============================================
+
+0. Guiding Principles  
+   • Modular, service-oriented architecture – every capability (chat, knowledge ingestion, file operations, character generation, rules Q&A) lives behind a clean interface.  
+   • “Bring-your-own content” – users can drop rulebooks, lore docs, premade character templates, etc. into a directory that the system automatically ingests.  
+   • Transparency & verifiability – every AI answer is accompanied by the supporting sources (file names + line ranges) so a DM can double-check.  
+   • Extensibility – new rule sets, game systems, or custom plugins can be added without touching core logic.
+
+1. Core Use-Cases & Features
+------------------------------------------------------------------
+1.1 Conversational Dungeon-Master Helper  
+      – Natural-language Q&A (rules, lore, NPC motivations, item descriptions).  
+      – Inline dice rolling and outcome explanation.  
+      – Context-aware suggestions (plot hooks, monster tactics, encounter balancing).
+
+1.2 Knowledge Management  
+      – Ingest and index:  
+        • Game rules (SRD, homebrew PDFs/Markdown).  
+        • Setting & story documents (world map lore, timeline, NPC bios).  
+        • Character templates / stat blocks (JSON/YAML or text).  
+      – Semantic search over this corpus to power answers and citations.
+
+1.3 Specialized Actions / Tools  
+      a) Character creation wizard  
+         • Pick template → choose race/class/background → auto-populate ability scores, proficiencies, equipment.  
+         • Exports to JSON + printable sheet (PDF).  
+      b) Encounter generator  
+         • Inputs: party level & size, environment, desired difficulty.  
+         • Output: balanced monster list with tactics.  
+      c) Loot / magic-item recommender.  
+      d) Session notes summarizer – post-game, upload chat log → summary & next-session hooks.
+
+1.4 File-System Interaction  
+      – Virtual “campaign folder” watched for changes; new docs auto-indexed.  
+      – Commands: list characters, show character X, diff between versions, etc.
+
+2. High-Level Architecture
+------------------------------------------------------------------
+┌─────────────────┐
+│   Web / UI      │  React / Next.js (desktop + mobile)
+└──────┬──────────┘
+       │ REST / WebSocket
+┌──────▼──────────┐
+│  API Gateway    │  FastAPI (Python) or NestJS (TS)
+└──────┬──────────┘
+       │
+┌──────▼──────────┐
+│  Orchestrator   │  Handles chat session, tool routing
+└─┬────┬────┬─────┘
+  │    │    │
+  │    │    │
+  │    │    └── Character Service
+  │    └──────── Knowledge Service (vector store)
+  └───────────── Dice / Rules Engine
+
+3. Technology Choices
+------------------------------------------------------------------
+Backend language: TypeScript (Node) **or** Python—pick one for MVP consistency.  
+LLM: OpenAI GPT-4o / local fallback (e.g., Llama-3 70B via Ollama).  
+Vector DB: Chroma, Pinecone, or PGVector.  
+Document parsing: Unstructured.io, pdfplumber, mdast, YAML/JSON loaders.  
+Realtime comms: WebSocket or Server-Sent Events.  
+Authentication: clerk.dev / Auth0 (optional).  
+Packaging: Docker-compose for dev, Kubernetes helm charts for prod.
+
+4. Data & File Conventions
+------------------------------------------------------------------
+campaign_root/
+├─ rules/            # PDFs, markdown, txt
+├─ lore/             # world docs
+├─ characters/
+│   ├─ templates/    # *.yaml
+│   └─ pcs/          # generated *.json
+└─ sessions/
+    ├─ 2025-07-08.md # raw session notes
+    └─ …
+
+5. Key Modules & Responsibilities
+------------------------------------------------------------------
+A. ChatSessionManager  
+   – Maintains running context tokens, streams responses, logs transcript.
+
+B. ToolRouter  
+   – Recognizes when a message should invoke a “tool” (character create, dice roll, file query) vs normal chat.
+
+C. KnowledgeIndexer  
+   – Crawls campaign_root, extracts, chunk-splits, embeds, stores citations.
+
+D. RetrievalAugmentation  
+   – Given a question, performs hybrid search (keyword + vector) → returns top-k chunks to LLM.
+
+E. DiceEngine  
+   – Parses roll expressions (e.g., “2d6+3”) → deterministic result (with seed for replay).
+
+F. CharacterService  
+   – CRUD operations on templates / PCs.  
+   – Balance & validation checks (ability score point-buy legality, equipment weight).
+
+G. RuleInterpreter  
+   – Structured representation of 5e rules → allows determinate answers when possible (e.g., proficiency bonus).
+
+6. Development Milestones
+------------------------------------------------------------------
+M0  Project bootstrap, repo scaffold, CI, lint/test infra.  
+M1  Conversational core with OpenAI + simple RAG over rules PDFs.  
+M2  File-watcher + KnowledgeIndexer pipeline (Markdown + PDF).  
+M3  DiceEngine + inline roll syntax in chat.  
+M4  Character template format + creation wizard UI.  
+M5  Encounter generator + CR balancing algorithm.  
+M6  Citation UI + full-text search panel in frontend.  
+M7  User authentication + multi-campaign support.  
+M8  Cloud deployment, monitoring, and backup strategy.
+
+7. Testing & QA
+------------------------------------------------------------------
+• Unit tests per module (parsers, dice math, CR calculations).  
+• Integration tests: ingest → query → verify correct chunks cited.  
+• E2E Cypress/Playwright flows for chat + character creation.  
+• Load tests simulating multiple concurrent sessions.  
+• Security: prompt-injection tests, file-system access sandboxing.
+
+8. Future Extensions
+------------------------------------------------------------------
+• Voice interface (speech-to-text, text-to-speech).  
+• Image generation for NPC portraits / maps.  
+• Support alternate RPG systems (Pathfinder, Cypher).  
+• Shared player view with fog-of-war map controls.  
+• Plugin marketplace for homebrew rule modules.
+
+Deliverables
+------------
+1. Monorepo scaffold with chosen stack.  
+2. Design docs (architecture, data schema, APIs).  
+3. Milestone backlog with issues & acceptance criteria.  
+4. Initial spike POC demonstrating: chat ➜ rules PDF retrieval ➜ sourced answer.
+

@@ -1,0 +1,76 @@
+name: "Fighter Template"
+description: "A basic fighter character template suitable for new players"
+race: "Human"
+character_class: "Fighter"
+background: "Soldier"
+level: 1
+
+ability_scores:
+  strength: 15
+  dexterity: 13
+  constitution: 14
+  intelligence: 10
+  wisdom: 12
+  charisma: 8
+
+hit_dice: "1d10"
+proficiency_bonus: 2
+
+proficiencies:
+  armor:
+    - "Light armor"
+    - "Medium armor" 
+    - "Heavy armor"
+    - "Shields"
+  weapons:
+    - "Simple weapons"
+    - "Martial weapons"
+  saving_throws:
+    - "Strength"
+    - "Constitution"
+  skills:
+    - "Athletics"
+    - "Intimidation"
+
+equipment:
+  - name: "Chain mail"
+    type: "armor"
+    ac: 16
+  - name: "Longsword"
+    type: "weapon"
+    damage: "1d8+3"
+    damage_type: "slashing"
+  - name: "Shield"
+    type: "shield"
+    ac_bonus: 2
+  - name: "Javelin (4)"
+    type: "weapon"
+    damage: "1d6+3"
+    damage_type: "piercing"
+    range: "30/120"
+  - name: "Explorer's pack"
+    type: "equipment"
+  - name: "Insignia of rank"
+    type: "trinket"
+  - name: "Playing cards"
+    type: "trinket"
+
+features:
+  - name: "Fighting Style"
+    description: "Choose a fighting style: Defense, Dueling, Great Weapon Fighting, or Protection"
+  - name: "Second Wind"
+    description: "Regain 1d10+1 hit points as a bonus action (recharges on short or long rest)"
+  - name: "Military Rank"
+    description: "You have a military rank from your career as a soldier"
+
+spells: []
+
+languages:
+  - "Common"
+  - "One extra language of your choice"
+
+calculated_stats:
+  armor_class: 18  # Chain mail (16) + Shield (2)
+  hit_points: 13   # 10 + CON modifier (2) + 1 (human bonus)
+  speed: 30
+  passive_perception: 11 

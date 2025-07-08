@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: dmhelper-postgres
+    environment:
+      POSTGRES_DB: dmhelper_db
+      POSTGRES_USER: dmhelper
+      POSTGRES_PASSWORD: password
+      POSTGRES_TEST_DB: dmhelper_test_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    restart: unless-stopped
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dmhelper-backend
+    environment:
+      - DATABASE_URL=sqlite:///./dmhelper.db
+      # For PostgreSQL: DATABASE_URL=postgresql://dmhelper:password@postgres:5432/dmhelper_db
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-your_key_here}
+      - SECRET_KEY=${SECRET_KEY:-dev_secret_key_change_in_production}
+      - DEBUG=true
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - CHROMA_PERSIST_DIRECTORY=/app/data/chroma
+      - CAMPAIGN_ROOT_DIR=/app/data/campaigns
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - backend_data:/app/data
+      - campaign_data:/app/data/campaigns
+    # depends_on:
+    #   - postgres
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dmhelper-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+    command: npm run dev
+
+  # Redis (for caching and session storage)
+  redis:
+    image: redis:7-alpine
+    container_name: dmhelper-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  backend_data:
+  campaign_data:
+  redis_data: 
