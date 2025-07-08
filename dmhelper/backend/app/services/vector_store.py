@@ -334,6 +334,15 @@ class VectorStore:
             logger.error(f"Failed to clear collection: {e}")
             return False
     
+    def get_all_sources(self) -> List[str]:
+        """Get list of all source files in the collection."""
+        try:
+            stats = self.get_collection_stats()
+            return stats.get("source_files", [])
+        except Exception as e:
+            logger.error(f"Failed to get all sources: {e}")
+            return []
+    
     def health_check(self) -> Dict[str, Any]:
         """Check if the vector store is healthy."""
         try:

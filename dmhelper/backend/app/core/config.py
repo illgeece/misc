@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # Testing
     testing: bool = Field(default=False, env="TESTING")
     
+    @property
+    def campaign_root(self) -> str:
+        """Get campaign root directory for backward compatibility."""
+        return self.campaign_root_dir
+    
     class Config:
         env_file = ".env"
         case_sensitive = False

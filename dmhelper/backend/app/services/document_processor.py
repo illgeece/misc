@@ -99,6 +99,15 @@ class DocumentProcessor:
         
         processing_time = (datetime.now() - start_time).total_seconds() * 1000
         
+        # Add file metadata to all chunks
+        for chunk in chunks:
+            chunk.metadata.update({
+                "file_hash": content_hash,
+                "file_size": file_size,
+                "last_modified": last_modified.isoformat(),
+                "processing_time_ms": int(processing_time)
+            })
+        
         return ProcessedDocument(
             source_file=file_path,
             file_type=file_ext[1:],  # Remove the dot

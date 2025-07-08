@@ -1,0 +1,62 @@
+# FastAPI and Server Dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Database
+sqlalchemy==2.0.23
+alembic==1.12.1
+
+# AI/ML Dependencies
+ollama==0.4.1
+chromadb==0.4.18
+sentence-transformers==2.2.2
+langchain==0.0.350
+langchain-community==0.0.5
+langchain-ollama==0.3.3
+
+# Document Processing
+unstructured[pdf]==0.11.6
+pdfplumber==0.10.3
+python-multipart==0.0.6
+aiofiles==23.2.1
+
+# File System Monitoring
+watchdog==3.0.0
+
+# Serialization
+pyyaml==6.0.1
+orjson==3.9.10
+
+# HTTP Client - Updated to match ollama requirements
+httpx>=0.27.0,<0.28.0
+
+# Authentication & Security
+email-validator==2.1.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Logging
+structlog==23.2.0
+python-json-logger==2.0.7
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1
+pre-commit==3.6.0
+
+# WebSocket support
+websockets==12.0
+
+# Environment
+python-dotenv==1.0.0
+
+# Additional computation dependencies
+scikit-learn>=1.3.0
+numpy>=1.24.0
+python-dateutil==2.8.2 

@@ -6,6 +6,7 @@ import uvicorn
 
 from app.core.config import get_settings
 from app.api.routes import api_router
+from app.services.background_tasks import lifespan
 
 
 def create_app() -> FastAPI:
@@ -17,6 +18,7 @@ def create_app() -> FastAPI:
         description=settings.api_description,
         version=settings.api_version,
         debug=settings.debug,
+        lifespan=lifespan,
     )
     
     # Add CORS middleware
@@ -42,8 +44,45 @@ def create_app() -> FastAPI:
     
     @app.get("/health")
     async def health_check():
-        """Health check endpoint."""
-        return {"status": "healthy"}
+        """Comprehensive health check endpoint."""
+        try:
+            from app.services.background_tasks import background_task_manager
+            from app.services.knowledge_service import knowledge_service
+            from app.services.llm_service import llm_service
+            
+            # Get health status from all services
+            background_health = background_task_manager.health_check()
+            knowledge_health = knowledge_service.health_check()
+            llm_health = llm_service.health_check()
+            
+            # Determine overall health
+            all_healthy = all([
+                background_health.get("status") == "healthy",
+                knowledge_health.get("status") == "healthy",
+                llm_health.get("status") == "healthy"
+            ])
+            
+            return {
+                "status": "healthy" if all_healthy else "degraded",
+                "services": {
+                    "background_tasks": background_health,
+                    "knowledge": knowledge_health,
+                    "llm": llm_health
+                },
+                "api": {
+                    "status": "healthy",
+                    "version": settings.api_version
+                }
+            }
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "error": str(e),
+                "api": {
+                    "status": "healthy",
+                    "version": settings.api_version
+                }
+            }
     
     return app
 

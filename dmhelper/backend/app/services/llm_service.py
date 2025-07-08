@@ -123,7 +123,8 @@ class LLMService:
         self,
         user_message: str,
         conversation_history: List[ChatMessage],
-        retrieved_context: Optional[str] = None
+        retrieved_context: Optional[str] = None,
+        tool_context: Optional[str] = None
     ) -> LLMResponse:
         """Generate a DM-specific response with proper context."""
         
@@ -134,16 +135,38 @@ class LLMService:
 3. Helping with character creation and validation
 4. Offering tactical advice for combat and encounters
 5. Citing sources when referencing specific rules
+6. Explaining dice roll results and their game implications
+
+When dice rolls are executed, explain the results in context:
+- For attack rolls: mention hit/miss based on likely AC values
+- For damage rolls: describe the impact narratively
+- For ability checks: interpret success/failure and degrees
+- For saving throws: explain the consequences
+- For critical hits (nat 20): celebrate and suggest narrative flourishes
+- For critical failures (nat 1): offer dramatic failure descriptions
 
 Always be helpful, creative, and maintain the spirit of collaborative storytelling. When unsure about rules, clearly state your uncertainty and suggest consulting official sources."""
 
+        # Build comprehensive context
+        context_parts = []
+        
+        if retrieved_context:
+            context_parts.append("=== KNOWLEDGE CONTEXT ===")
+            context_parts.append(retrieved_context)
+            context_parts.append("=== END KNOWLEDGE CONTEXT ===")
+        
+        if tool_context:
+            context_parts.append(tool_context)
+        
+        combined_context = "\n\n".join(context_parts) if context_parts else None
+        
         # Combine user message with any retrieved context
         full_messages = conversation_history + [ChatMessage(role="user", content=user_message)]
         
         return await self.generate_response(
             messages=full_messages,
             system_prompt=system_prompt,
-            context=retrieved_context
+            context=combined_context
         )
     
     def health_check(self) -> Dict[str, Any]:

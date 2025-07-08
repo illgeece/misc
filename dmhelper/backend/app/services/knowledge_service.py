@@ -296,17 +296,183 @@ class KnowledgeService:
                 "message": f"Clear operation failed: {str(e)}"
             }
     
+    async def index_file_with_change_detection(self, file_path: str) -> Dict[str, Any]:
+        """Index a file with intelligent change detection."""
+        try:
+            logger.info(f"Indexing file with change detection: {file_path}")
+            
+            # Check if file exists
+            if not Path(file_path).exists():
+                logger.warning(f"File no longer exists: {file_path}")
+                return {
+                    "status": "warning",
+                    "message": f"File no longer exists: {file_path}",
+                    "file": file_path,
+                    "action": "skipped"
+                }
+            
+            # Get current file hash
+            current_hash = self.document_processor.get_file_hash(file_path)
+            
+            # Check if file is already indexed and unchanged
+            existing_chunks = self.vector_store.get_chunks_by_source(file_path)
+            
+            if existing_chunks:
+                # Get stored hash from metadata
+                stored_hash = existing_chunks[0].metadata.get("file_hash")
+                
+                if stored_hash == current_hash:
+                    logger.info(f"File unchanged, skipping re-indexing: {file_path}")
+                    return {
+                        "status": "success",
+                        "message": f"File unchanged, skipped re-indexing",
+                        "file": file_path,
+                        "action": "skipped",
+                        "reason": "no_changes"
+                    }
+            
+            # File is new or changed, proceed with indexing
+            return await self.index_single_file(file_path)
+            
+        except Exception as e:
+            logger.error(f"Failed to index file with change detection {file_path}: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to index file: {str(e)}",
+                "file": file_path,
+                "action": "failed"
+            }
+    
+    async def auto_refresh_indexes(self) -> Dict[str, Any]:
+        """Automatically refresh indexes by scanning for changes in the campaign directory."""
+        try:
+            logger.info("Starting automatic index refresh")
+            start_time = datetime.now()
+            
+            campaign_dir = Path(self.settings.campaign_root_dir)
+            if not campaign_dir.exists():
+                return {
+                    "status": "warning",
+                    "message": f"Campaign directory not found: {campaign_dir}",
+                    "refreshed_files": 0,
+                    "skipped_files": 0,
+                    "errors": 0
+                }
+            
+            # Get all currently indexed files
+            indexed_sources = set(self.vector_store.get_all_sources())
+            
+            # Get all files that should be indexed
+            current_files = set()
+            for file_path in campaign_dir.rglob("*"):
+                if file_path.is_file() and self.document_processor.is_supported(str(file_path)):
+                    current_files.add(str(file_path))
+            
+            # Files to remove (no longer exist)
+            files_to_remove = indexed_sources - current_files
+            
+            # Files to check for changes
+            files_to_check = current_files
+            
+            results = {
+                "refreshed_files": 0,
+                "skipped_files": 0,
+                "removed_files": 0,
+                "errors": 0,
+                "operations": []
+            }
+            
+            # Remove deleted files
+            for file_path in files_to_remove:
+                try:
+                    deleted_count = self.vector_store.delete_by_source(file_path)
+                    results["removed_files"] += 1
+                    results["operations"].append({
+                        "file": file_path,
+                        "action": "removed",
+                        "chunks_deleted": deleted_count
+                    })
+                    logger.info(f"Removed {deleted_count} chunks for deleted file: {file_path}")
+                except Exception as e:
+                    logger.error(f"Error removing deleted file {file_path}: {e}")
+                    results["errors"] += 1
+            
+            # Check and update existing/new files
+            for file_path in files_to_check:
+                try:
+                    result = await self.index_file_with_change_detection(file_path)
+                    
+                    if result["action"] == "skipped":
+                        results["skipped_files"] += 1
+                    elif result["status"] == "success":
+                        results["refreshed_files"] += 1
+                    elif result["status"] == "error":
+                        results["errors"] += 1
+                    
+                    results["operations"].append({
+                        "file": file_path,
+                        "action": result["action"],
+                        "status": result["status"],
+                        "chunks": result.get("chunks_added", 0)
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Error processing file {file_path}: {e}")
+                    results["errors"] += 1
+            
+            processing_time = (datetime.now() - start_time).total_seconds() * 1000
+            
+            return {
+                "status": "success",
+                "message": f"Index refresh completed",
+                "processing_time_ms": int(processing_time),
+                **results
+            }
+            
+        except Exception as e:
+            logger.error(f"Auto refresh failed: {e}")
+            return {
+                "status": "error",
+                "message": f"Auto refresh failed: {str(e)}",
+                "refreshed_files": 0,
+                "skipped_files": 0,
+                "errors": 1
+            }
+    
+    def get_file_watcher_status(self) -> Dict[str, Any]:
+        """Get status information about file watching."""
+        try:
+            # Import here to avoid circular imports
+            from app.services.file_watcher import file_watcher_service
+            
+            watcher_status = file_watcher_service.get_status()
+            watcher_health = file_watcher_service.health_check()
+            
+            return {
+                "file_watching_enabled": self.settings.watch_file_changes,
+                "watcher_service": watcher_status,
+                "watcher_health": watcher_health
+            }
+        except Exception as e:
+            return {
+                "file_watching_enabled": self.settings.watch_file_changes,
+                "watcher_service": {"error": str(e)},
+                "watcher_health": {"status": "unhealthy", "error": str(e)}
+            }
+
     def health_check(self) -> Dict[str, Any]:
         """Check the health of the knowledge service."""
         try:
             
             vector_health = self.vector_store.health_check()
             stats = self.get_knowledge_stats()
+            watcher_status = self.get_file_watcher_status()
             
             return {
                 "status": "healthy" if vector_health.get("status") == "healthy" else "unhealthy",
                 "vector_store": vector_health,
                 "knowledge_stats": stats,
+                "file_watcher": watcher_status,
                 "campaign_directory": self.settings.campaign_root_dir,
                 "campaign_directory_exists": Path(self.settings.campaign_root_dir).exists()
             }

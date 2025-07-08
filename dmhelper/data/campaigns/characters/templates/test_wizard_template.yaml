@@ -1,0 +1,90 @@
+name: "Test Wizard Template"
+description: "A template for creating a basic wizard character for testing"
+author: "M4 Test Suite"
+version: "1.0"
+
+# Character basics
+race: "human"
+character_class: "wizard"
+background: "sage"
+level: 1
+
+# Suggested ability scores (before racial bonuses)
+ability_scores:
+  strength: 8
+  dexterity: 14
+  constitution: 13
+  intelligence: 15
+  wisdom: 12
+  charisma: 10
+
+# Proficiencies
+proficiencies:
+  skills:
+    - "arcana"
+    - "investigation"
+  saving_throws:
+    - "intelligence"
+    - "wisdom"
+  weapons:
+    - "daggers"
+    - "darts"
+    - "slings"
+    - "quarterstaffs"
+    - "light crossbows"
+  armor: []
+  tools:
+    - "herbalism kit"
+
+# Languages
+languages:
+  - "Common"
+  - "Draconic"
+
+# Starting equipment
+equipment:
+  - name: "Quarterstaff"
+    type: "weapon"
+    description: "A simple weapon"
+    damage: "1d6"
+    damage_type: "bludgeoning"
+  - name: "Dagger"
+    type: "weapon"
+    description: "A simple finesse weapon"
+    damage: "1d4"
+    damage_type: "piercing"
+  - name: "Spellbook"
+    type: "equipment"
+    description: "A wizard's spellbook containing cantrips and 1st-level spells"
+  - name: "Component Pouch"
+    type: "equipment"
+    description: "A spellcasting focus"
+
+# Class features
+features:
+  - name: "Spellcasting"
+    description: "You can cast wizard spells using Intelligence as your spellcasting ability"
+    source: "class"
+    level_acquired: 1
+  - name: "Arcane Recovery"
+    description: "You can recover some expended spell slots during a short rest"
+    source: "class"
+    level_acquired: 1
+    uses_per_rest: 1
+    rest_type: "long"
+
+# Template customization options
+customizable_fields:
+  - "name"
+  - "ability_scores"
+  - "equipment"
+
+required_choices:
+  cantrips:
+    - "mage hand"
+    - "prestidigitation"
+    - "minor illusion"
+  spells:
+    - "magic missile"
+    - "shield"
+    - "detect magic" 

@@ -230,6 +230,99 @@ async def get_knowledge_stats():
         raise HTTPException(status_code=500, detail=f"Failed to get knowledge stats: {str(e)}")
 
 
+@router.post("/watcher/start")
+async def start_file_watcher():
+    """Start the file watcher service."""
+    try:
+        from app.services.background_tasks import background_task_manager
+        
+        # If background task manager is not running, start it
+        if not background_task_manager.is_running:
+            startup_result = await background_task_manager.startup()
+            if startup_result["status"] == "error":
+                raise HTTPException(status_code=500, detail=startup_result["message"])
+        else:
+            # Just restart the file watcher
+            restart_result = await background_task_manager.restart_file_watcher()
+            if restart_result["status"] == "error":
+                raise HTTPException(status_code=500, detail=restart_result["message"])
+        
+        return {
+            "status": "success",
+            "message": "File watcher started successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start file watcher: {str(e)}")
+
+
+@router.post("/watcher/stop")
+async def stop_file_watcher():
+    """Stop the file watcher service."""
+    try:
+        from app.services.file_watcher import file_watcher_service
+        
+        result = await file_watcher_service.stop_watching()
+        
+        if result["status"] == "error":
+            raise HTTPException(status_code=500, detail=result["message"])
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to stop file watcher: {str(e)}")
+
+
+@router.post("/watcher/restart")
+async def restart_file_watcher():
+    """Restart the file watcher service."""
+    try:
+        from app.services.background_tasks import background_task_manager
+        
+        result = await background_task_manager.restart_file_watcher()
+        
+        if result["status"] == "error":
+            raise HTTPException(status_code=500, detail=result["message"])
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to restart file watcher: {str(e)}")
+
+
+@router.get("/watcher/status")
+async def get_file_watcher_status():
+    """Get the file watcher service status."""
+    try:
+        from app.services.file_watcher import file_watcher_service
+        
+        status = file_watcher_service.get_status()
+        return status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get file watcher status: {str(e)}")
+
+
+@router.post("/refresh/auto")
+async def manual_refresh():
+    """Manually trigger a complete knowledge base refresh with change detection."""
+    try:
+        from app.services.background_tasks import background_task_manager
+        
+        result = await background_task_manager.trigger_manual_refresh()
+        
+        if result["status"] == "error":
+            raise HTTPException(status_code=500, detail=result["message"])
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Manual refresh failed: {str(e)}")
+
+
 @router.get("/health")
 async def knowledge_health_check():
     """Check the health of the knowledge service."""
