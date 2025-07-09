@@ -1,0 +1,1 @@
+ The outskirts of the lower side of Zhou on the 21st floor. Sparsely populated in most areas filled with small farms that basically sustain themselves and sometimes go into Qin to trade their excess. There are some small communities scattered around.

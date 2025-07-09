@@ -71,9 +71,44 @@ class VectorStore:
                 )
                 logger.info(f"Created new collection: {self.settings.chroma_collection_name}")
             
+            # Rebuild TF-IDF vectorizer from existing documents if any exist
+            self._rebuild_vectorizer_from_existing()
+            
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
             raise RuntimeError(f"Vector store initialization failed: {e}")
+    
+    def _rebuild_vectorizer_from_existing(self):
+        """Rebuild the TF-IDF vectorizer from existing documents in ChromaDB."""
+        try:
+            # Get all existing documents
+            existing_data = self._collection.get(include=["documents"])
+            existing_docs = existing_data.get("documents", [])
+            
+            if not existing_docs:
+                logger.info("No existing documents found - vectorizer will be fitted on first add")
+                self._document_texts = []
+                self._document_vectors = None
+                return
+            
+            logger.info(f"Rebuilding TF-IDF vectorizer from {len(existing_docs)} existing documents")
+            
+            # Fit vectorizer on existing documents
+            tfidf_matrix = self.vectorizer.fit_transform(existing_docs)
+            
+            # Store the state - ensure we use the same document order as in ChromaDB
+            self._document_texts = existing_docs.copy()
+            self._document_vectors = tfidf_matrix.toarray()
+            
+            logger.info(f"Vectorizer rebuilt with vocabulary size: {len(self.vectorizer.vocabulary_)}")
+            logger.info(f"Document vectors shape: {self._document_vectors.shape}")
+            
+        except Exception as e:
+            logger.error(f"Failed to rebuild vectorizer from existing documents: {e}")
+            # Reset state on failure
+            self._document_texts = []
+            self._document_vectors = None
+            # Continue anyway - vectorizer will be fitted on next add
     
     def add_chunks(self, chunks: List[DocumentChunk]) -> int:
         """Add document chunks to the vector store."""
@@ -112,20 +147,24 @@ class VectorStore:
             
             # Generate TF-IDF embeddings
             logger.info(f"Generating TF-IDF embeddings for {len(documents)} chunks...")
-            
-            # If we have existing documents, we need to retrain the vectorizer
-            all_documents = self._document_texts + documents
-            if all_documents:
-                # Fit vectorizer on all documents
-                tfidf_matrix = self.vectorizer.fit_transform(all_documents)
-                # Get embeddings for just the new documents
-                new_doc_embeddings = tfidf_matrix[-len(documents):].toarray()
-                embeddings = new_doc_embeddings.tolist()
-                # Update our stored texts
-                self._document_texts = all_documents
+
+            # Fit or transform using the TF-IDF vectorizer
+            if not self._document_texts:
+                # First time – fit the vectorizer on the incoming documents
+                tfidf_matrix = self.vectorizer.fit_transform(documents)
+                embeddings = tfidf_matrix.toarray().tolist()
+                self._document_texts = documents.copy()
                 self._document_vectors = tfidf_matrix.toarray()
             else:
-                embeddings = []
+                # Vectorizer is already fitted – transform only, keeping dimension constant
+                tfidf_matrix = self.vectorizer.transform(documents)
+                embeddings = tfidf_matrix.toarray().tolist()
+                # Append to stored texts/vectors for future operations
+                self._document_texts.extend(documents)
+                if self._document_vectors is not None:
+                    self._document_vectors = np.vstack([self._document_vectors, tfidf_matrix.toarray()])
+                else:
+                    self._document_vectors = tfidf_matrix.toarray()
             
             # Add to collection
             self._collection.add(
@@ -152,7 +191,7 @@ class VectorStore:
         """Search for similar chunks using semantic similarity."""
         try:
             # Check if we have any documents
-            if not self._document_texts:
+            if not self._document_texts or self._document_vectors is None:
                 logger.info("No documents in vector store for search")
                 return []
             
@@ -163,53 +202,48 @@ class VectorStore:
             similarities = cosine_similarity(query_tfidf, self._document_vectors)[0]
             
             # Get top similar documents
-            top_indices = np.argsort(similarities)[::-1][:limit]
+            top_indices = np.argsort(similarities)[::-1]
             
-            # Query ChromaDB to get the actual documents
-            all_docs = self._collection.get(include=["documents", "metadatas"])
-            
-            results = {
-                'documents': [[]],
-                'metadatas': [[]],
-                'distances': [[]]
-            }
-            
-            for idx in top_indices:
-                if idx < len(all_docs['documents']) and similarities[idx] > min_score:
-                    results['documents'][0].append(all_docs['documents'][idx])
-                    results['metadatas'][0].append(all_docs['metadatas'][idx])
-                    results['distances'][0].append(1.0 - similarities[idx])  # Convert similarity to distance
-            
-            # Convert to VectorSearchResult objects
+            # Build results directly from our cached document texts and vectors
             search_results = []
             
-            if results['documents'] and results['documents'][0]:
-                documents = results['documents'][0]
-                metadatas = results['metadatas'][0]
-                distances = results['distances'][0]
-                
-                for doc, metadata, distance in zip(documents, metadatas, distances):
-                    # Convert distance to similarity score (0-1, higher is better)
-                    score = max(0.0, 1.0 - distance)
+            # Get metadata for all documents from ChromaDB (to maintain consistency)
+            all_docs = self._collection.get(include=["documents", "metadatas"])
+            
+            # Create a mapping from document content to metadata
+            doc_to_metadata = {}
+            if all_docs['documents'] and all_docs['metadatas']:
+                for doc, metadata in zip(all_docs['documents'], all_docs['metadatas']):
+                    doc_to_metadata[doc] = metadata
+            
+            for idx in top_indices:
+                if len(search_results) >= limit:
+                    break
                     
-                    # Filter by minimum score
-                    if score >= min_score:
-                        # Reconstruct DocumentChunk
-                        chunk = DocumentChunk(
-                            content=doc,
-                            source_file=metadata.get("source_file", "unknown"),
-                            chunk_id=metadata.get("chunk_id", str(uuid.uuid4())),
-                            page_number=metadata.get("page_number"),
-                            start_line=metadata.get("start_line"),
-                            end_line=metadata.get("end_line"),
-                            metadata=metadata
-                        )
-                        
-                        search_results.append(VectorSearchResult(
-                            chunk=chunk,
-                            score=score,
-                            distance=distance
-                        ))
+                if idx < len(self._document_texts) and similarities[idx] > min_score:
+                    doc_content = self._document_texts[idx]
+                    similarity_score = similarities[idx]
+                    distance = 1.0 - similarity_score
+                    
+                    # Get metadata for this document
+                    metadata = doc_to_metadata.get(doc_content, {})
+                    
+                    # Reconstruct DocumentChunk
+                    chunk = DocumentChunk(
+                        content=doc_content,
+                        source_file=metadata.get("source_file", "unknown"),
+                        chunk_id=metadata.get("chunk_id", str(uuid.uuid4())),
+                        page_number=metadata.get("page_number"),
+                        start_line=metadata.get("start_line"),
+                        end_line=metadata.get("end_line"),
+                        metadata=metadata
+                    )
+                    
+                    search_results.append(VectorSearchResult(
+                        chunk=chunk,
+                        score=similarity_score,
+                        distance=distance
+                    ))
             
             logger.info(f"Search for '{query}' returned {len(search_results)} results")
             return search_results

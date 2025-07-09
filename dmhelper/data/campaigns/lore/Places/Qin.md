@@ -1,0 +1,3 @@
+ City on the 22nd floor, the second established by Zhou immediately after their formation. Large but more rural than the other two major cities. Mainly a farming and animal rearing area.
+
+Yellow-Gold River: The largest river in Zhou, running through the entirety of the 24th floor, floods every 7 months and washes up all the nutrients and makes soil fertile. This allows for bountiful harvest coming out of Zhou.

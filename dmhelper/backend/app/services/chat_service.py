@@ -7,7 +7,7 @@ import uuid
 
 from app.services.llm_service import llm_service, ChatMessage, LLMResponse
 from app.services.knowledge_service import knowledge_service
-from app.services.tool_router import tool_router, MessageWithTools, ToolType, ToolResult
+from app.services.tool_router import tool_router, ToolType, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +120,21 @@ class ChatService:
                     # Use the original message for RAG search to get better context
                     search_results = await self.knowledge_service.search_knowledge(
                         user_message,
-                        limit=5,
-                        min_score=0.1
+                        limit=8,
+                        min_score=0.0
                     )
+
+                    # Fallback: if nothing returned, try a simpler keyword-only query (last 3 words)
+                    if search_results.get("total_results", 0) == 0:
+                        simplified_query = " ".join(user_message.split()[-3:])
+                        if simplified_query and simplified_query.lower() != user_message.lower():
+                            alt_results = await self.knowledge_service.search_knowledge(
+                                simplified_query,
+                                limit=8,
+                                min_score=0.0
+                    )
+                            if alt_results.get("total_results", 0) > 0:
+                                search_results = alt_results
                     
                     # Build context from search results
                     context_parts = []

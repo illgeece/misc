@@ -1,0 +1,1 @@
+**Newer news station that is invested in and controlled by pretty much every large entity, pushes their propaganda rather than what is necessarily true. Does paper as well as radio via sending stones attuned to a frequency that is relayed by a tower on each floor that is connected to a base station at their main broadcasting station.**

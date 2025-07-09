@@ -1,0 +1,2 @@
+"The Glister Witch"
+Goddess of women, the daughter of Mephistopheles, the most powerful of the Draia. Completely consumed by hatred for her father and mother and basically everyone else. Leads the [[Medeans]].

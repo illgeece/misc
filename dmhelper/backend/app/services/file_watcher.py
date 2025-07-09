@@ -120,7 +120,8 @@ class FileWatcherService:
         self.observer: Optional[Observer] = None
         self.event_handler: Optional[CampaignFileEventHandler] = None
         self.is_running = False
-        self.watch_path = self.settings.campaign_root_dir
+        # Resolve to absolute path so watcher points to correct directory even if relative path supplied via env
+        self.watch_path = str(Path(self.settings.campaign_root_dir).expanduser().resolve())
         
         # Queue for processing file events
         self._event_queue = asyncio.Queue()

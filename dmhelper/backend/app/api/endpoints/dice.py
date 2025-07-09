@@ -193,13 +193,9 @@ async def detect_dice_in_text(
         
         dice_detections = [
             {
-                "detected_text": detection.extracted_text,
+                "detected_text": detection.original_text,
                 "expression": detection.parameters.get('expression', ''),
                 "confidence": detection.confidence,
-                "position": {
-                    "start": detection.start_pos,
-                    "end": detection.end_pos
-                },
                 "suggested": detection.parameters.get('suggested', False),
                 "check_type": detection.parameters.get('check_type')
             }

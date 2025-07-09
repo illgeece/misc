@@ -1,0 +1,1 @@
+City on the 24th floor. Third major city, much more urban and tightly organized, so smaller even though it has a similar population. Hub of industry in the Empire.

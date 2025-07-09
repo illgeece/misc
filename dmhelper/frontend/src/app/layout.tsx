@@ -8,7 +8,11 @@ const inter = Inter({ subsets: ['latin'] });
 export const metadata: Metadata = {
   title: 'DM Helper - AI Dungeon Master Companion',
   description: 'An intelligent assistant for Dungeon Masters with AI-powered chat, character creation, and knowledge management.',
-  viewport: 'width=device-width, initial-scale=1',
+};
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
   themeColor: '#dc2626',
 };
 

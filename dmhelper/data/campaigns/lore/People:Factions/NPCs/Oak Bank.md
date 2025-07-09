@@ -1,0 +1,1 @@
+**The largest collection of money in the tower, they lend to everyone and have a stake in the largest companies/kingdoms. Only make decisions based on money and will do anything to grow their investments safely in spite of cost of lives etc.**

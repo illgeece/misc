@@ -1,0 +1,1 @@
+Newer city established on the 25th floor during the height of King Sho’s reign in 4E when he defeated all of the random bandits and tribes there and form a city for the swelling population at the time.

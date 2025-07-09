@@ -41,6 +41,20 @@ class BackgroundTaskManager:
             else:
                 results["file_watcher"] = "disabled"
             
+            # Perform initial knowledge base indexing on startup
+            try:
+                from app.services.knowledge_service import knowledge_service
+                # Ensure vector store is clean to avoid dimension mismatches between runs
+                await knowledge_service.clear_knowledge_base()
+                index_result = await knowledge_service.auto_refresh_indexes()
+                results["initial_index"] = index_result.get("status", "unknown")
+                logger.info(
+                    "Initial knowledge base indexing completed with status: %s", index_result.get("status")
+                )
+            except Exception as e:
+                logger.error("Initial knowledge base indexing failed: %s", e)
+                results["initial_index"] = "error"
+            
             self.is_running = True
             
             logger.info("Background services started successfully")

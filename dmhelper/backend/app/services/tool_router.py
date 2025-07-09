@@ -1,489 +1,638 @@
-"""Tool router service for detecting and routing tool usage in chat messages."""
+"""Tool router service for detecting and routing natural language tool requests."""
 
 import re
 import logging
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Union, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Any, Set
 from enum import Enum
-
-from .dice_engine import DiceEngine, DiceExpression
 
 logger = logging.getLogger(__name__)
 
 
 class ToolType(Enum):
-    """Types of tools that can be detected and routed."""
+    """Types of tools that can be detected and executed."""
     DICE_ROLL = "dice_roll"
-    FILE_QUERY = "file_query"
-    CHARACTER_CREATE = "character_create"
-    KNOWLEDGE_SEARCH = "knowledge_search"
-    SPELL_LOOKUP = "spell_lookup"
-    MONSTER_LOOKUP = "monster_lookup"
-    RULE_LOOKUP = "rule_lookup"
+    CHARACTER_CREATION = "character_creation"
+    ENCOUNTER_GENERATION = "encounter_generation"
+    KNOWLEDGE_QUERY = "knowledge_query"
 
 
 @dataclass
-class ToolDetection:
+class DetectedTool:
     """Represents a detected tool usage in a message."""
     tool_type: ToolType
-    confidence: float  # 0.0 to 1.0
-    extracted_text: str  # The specific text that triggered the detection
-    parameters: Dict[str, Any]  # Tool-specific parameters
-    start_pos: int = 0  # Position in original message
-    end_pos: int = 0    # End position in original message
+    confidence: float
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    original_text: str = ""
+    suggested_action: str = ""
 
 
 @dataclass
 class ToolResult:
-    """Result of executing a tool."""
+    """Result of executing a detected tool."""
     tool_type: ToolType
     success: bool
-    result: Any
-    error_message: Optional[str] = None
-    execution_time_ms: Optional[float] = None
+    result: Any = None
+    formatted_result: str = ""
+    error_message: str = ""
+    execution_time_ms: float = 0.0
 
 
 @dataclass
-class MessageWithTools:
-    """A chat message with detected and executed tools."""
+class ProcessedMessage:
+    """A message processed through the tool router."""
     original_message: str
-    cleaned_message: str  # Message with tool expressions removed/replaced
-    detected_tools: List[ToolDetection]
-    tool_results: List[ToolResult]
+    cleaned_message: str
+    detected_tools: List[DetectedTool] = field(default_factory=list)
+    tool_results: List[ToolResult] = field(default_factory=list)
+    confidence_scores: Dict[str, float] = field(default_factory=dict)
     has_tools: bool = False
 
 
 class ToolRouter:
-    """Service for detecting and routing tool usage in chat messages."""
+    """Service for detecting and routing tool usage in natural language messages."""
     
-    # Dice roll detection patterns
-    DICE_PATTERNS = [
-        # Direct dice expressions
-        re.compile(r'\b(\d*d\d+(?:[+-]\d+)?(?:adv|dis|dl\d*|dh\d*|kh\d*|kl\d*)?)\b', re.IGNORECASE),
+    def __init__(self, dice_engine=None, encounter_service=None):
+        self.dice_engine = dice_engine
+        self.encounter_service = encounter_service
         
-        # Natural language dice requests
-        re.compile(r'\b(?:roll|make|do)\s+(?:a\s+)?(\d*d\d+(?:[+-]\d+)?)\b', re.IGNORECASE),
-        re.compile(r'\b(?:roll|throw)\s+(?:a\s+|an\s+)?(\d+)\s*(?:sided\s+)?(?:die|dice)\b', re.IGNORECASE),
-        re.compile(r'\b(?:d|dice?)\s*(\d+)\s*(?:roll|check)?\b', re.IGNORECASE),
-        
-        # D&D specific rolls
-        re.compile(r'\b(?:attack|hit|strike)(?:\s+with)?\s+(\d*d\d+(?:[+-]\d+)?)\b', re.IGNORECASE),
-        re.compile(r'\b(?:damage|dmg)(?:\s+of)?\s+(\d*d\d+(?:[+-]\d+)?)\b', re.IGNORECASE),
-        re.compile(r'\b(\d*d\d+(?:[+-]\d+)?)\s+(?:damage|dmg)\b', re.IGNORECASE),
-        
-        # Saving throws and checks
-        re.compile(r'\b(?:saving?\s+throw|save|check)\s+(\d*d\d+(?:[+-]\d+)?|\d+)?\b', re.IGNORECASE),
-        re.compile(r'\b(?:make\s+a|roll\s+a|do\s+a)\s+(\w+)\s+(?:check|save|saving\s+throw)\b', re.IGNORECASE),
-        
-        # Initiative and specific D&D mechanics
-        re.compile(r'\b(?:initiative|init)(?:\s+roll)?\b', re.IGNORECASE),
-        re.compile(r'\b(?:advantage|adv|disadvantage|dis|with\s+advantage|with\s+disadvantage)\b', re.IGNORECASE),
-    ]
-    
-    # Common ability/skill names for auto-suggesting d20 rolls
-    D20_ABILITIES = {
-        'strength', 'str', 'dexterity', 'dex', 'constitution', 'con',
-        'intelligence', 'int', 'wisdom', 'wis', 'charisma', 'cha',
-        'acrobatics', 'animal handling', 'arcana', 'athletics', 'deception',
-        'history', 'insight', 'intimidation', 'investigation', 'medicine',
-        'nature', 'perception', 'performance', 'persuasion', 'religion',
-        'sleight of hand', 'stealth', 'survival', 'initiative'
-    }
-    
-    # File query patterns
-    FILE_QUERY_PATTERNS = [
-        re.compile(r'\b(?:show|display|get|find|lookup?)\s+(?:file|document|character|pc)\s+([^\s]+)\b', re.IGNORECASE),
-        re.compile(r'\b(?:what|show)(?:\s+is|\s+are)?\s+(?:in\s+)?([^\s]+\.(?:pdf|md|yaml|yml|json))\b', re.IGNORECASE),
-        re.compile(r'\b(?:open|read|view)\s+([^\s]+)\b', re.IGNORECASE),
-    ]
-    
-    # Knowledge search patterns
-    KNOWLEDGE_PATTERNS = [
-        re.compile(r'\b(?:what\s+(?:is|are)|tell\s+me\s+about|explain|describe)\s+(.+?)(?:\?|$)', re.IGNORECASE),
-        re.compile(r'\b(?:how\s+(?:does|do|to)|where\s+(?:is|are))\s+(.+?)(?:\?|$)', re.IGNORECASE),
-        re.compile(r'\b(?:search|find|lookup?)\s+(?:for\s+)?(.+?)\b', re.IGNORECASE),
-    ]
-    
-    def __init__(self, dice_engine: Optional[DiceEngine] = None):
-        self.dice_engine = dice_engine or DiceEngine()
-        
-        # Confidence thresholds for different tool types
-        self.confidence_thresholds = {
-            ToolType.DICE_ROLL: 0.6,
-            ToolType.FILE_QUERY: 0.7,
-            ToolType.KNOWLEDGE_SEARCH: 0.5,
+        # Tool detection patterns with confidence weights
+        self.tool_patterns = {
+            ToolType.DICE_ROLL: [
+                # Explicit dice expressions
+                (r'\b\d*d\d+([+-]\d+)?(?:adv|dis|dl\d*|dh\d*|kh\d*|kl\d*)?\b', 0.95),
+                (r'\broll\s+\d*d\d+\b', 0.9),
+                (r'\b(?:roll|rolling)\s+(?:a\s+)?d\d+\b', 0.85),
+                
+                # D&D ability/skill checks
+                (r'\b(?:strength|str|dexterity|dex|constitution|con|intelligence|int|wisdom|wis|charisma|cha)\s+(?:check|save|saving throw)\b', 0.8),
+                (r'\b(?:acrobatics|athletics|deception|history|insight|intimidation|investigation|medicine|nature|perception|performance|persuasion|religion|sleight of hand|stealth|survival|arcana|animal handling)\s+check\b', 0.8),
+                
+                # Combat actions
+                (r'\b(?:attack|hit|strike|shoot|cast|damage)\b.*\bd\d+\b', 0.75),
+                (r'\battack\s+(?:roll|check)\b', 0.8),
+                (r'\bdamage\s+roll\b', 0.8),
+                (r'\binitiative\s+(?:roll|check)?\b', 0.8),
+                
+                # Death saves and other special rolls
+                (r'\bdeath\s+sav(?:e|ing throw)\b', 0.9),
+                (r'\bconcentration\s+(?:check|save)\b', 0.8),
+                
+                # General roll language
+                (r'\b(?:make|do|roll|give me)\s+(?:a|an)?\s*\w*\s*(?:roll|check)\b', 0.6),
+                (r'\broll\s+for\s+\w+\b', 0.7),
+            ],
+            
+            ToolType.ENCOUNTER_GENERATION: [
+                # Direct encounter requests
+                (r'\b(?:generate|create|make|build|design)\s+(?:an?\s+)?encounter\b', 0.9),
+                (r'\bneed\s+(?:an?\s+)?encounter\s+for\b', 0.85),
+                (r'\bencounter\s+(?:for|against|with)\b', 0.8),
+                
+                # Difficulty specifications
+                (r'\b(?:easy|medium|hard|deadly)\s+encounter\b', 0.85),
+                (r'\bencounter\s+.*(?:easy|medium|hard|deadly)\b', 0.8),
+                (r'\b(?:challenge rating|cr)\s+\d+\b', 0.7),
+                
+                # Environment specifications
+                (r'\bencounter\s+in\s+(?:a|the)?\s*(?:forest|dungeon|mountains?|swamp|desert|city|urban|underground|cave|wilderness)\b', 0.8),
+                (r'\b(?:forest|dungeon|mountain|swamp|desert|urban|underground)\s+encounter\b', 0.8),
+                
+                # Party specifications
+                (r'\bfor\s+(?:a\s+)?party\s+of\s+\d+\b', 0.75),
+                (r'\b(?:level|lvl)\s+\d+\s+(?:party|characters?|pcs?)\b', 0.75),
+                (r'\b\d+\s+(?:level|lvl)\s+\d+\s+characters?\b', 0.8),
+                
+                # Monster/combat terms
+                (r'\bfight\s+(?:against|with|some)\b', 0.6),
+                (r'\bbattle\s+(?:against|with)\b', 0.6),
+                (r'\bcombat\s+encounter\b', 0.85),
+                (r'\bmonsters?\s+for\b', 0.7),
+                
+                # Balance/difficulty terms
+                (r'\bbalanced?\s+(?:encounter|fight|combat)\b', 0.8),
+                (r'\bappropriate\s+(?:encounter|challenge)\b', 0.7),
+                (r'\bxp\s+budget\b', 0.9),
+            ],
+            
+            ToolType.CHARACTER_CREATION: [
+                # Character creation requests
+                (r'\b(?:create|make|generate|build)\s+(?:a|an)?\s*(?:new\s+)?character\b', 0.9),
+                (r'\bcharacter\s+(?:creation|generator|builder)\b', 0.9),
+                (r'\bneed\s+(?:a|an)\s+(?:new\s+)?character\b', 0.8),
+                
+                # Class/race mentions
+                (r'\bmake\s+(?:a|an)\s+(?:fighter|wizard|rogue|cleric|ranger|paladin|barbarian|bard|druid|monk|sorcerer|warlock)\b', 0.85),
+                (r'\b(?:human|elf|dwarf|halfling|dragonborn|gnome|half-elf|half-orc|tiefling)\s+(?:fighter|wizard|rogue|cleric|ranger|paladin|barbarian|bard|druid|monk|sorcerer|warlock)\b', 0.9),
+                
+                # Ability scores
+                (r'\bability\s+scores?\b', 0.7),
+                (r'\b(?:point buy|standard array|roll(?:ed)?\s+stats)\b', 0.8),
+                (r'\bstats?\s+(?:for|generation)\b', 0.6),
+                
+                # Character templates
+                (r'\bcharacter\s+template\b', 0.85),
+                (r'\bfrom\s+template\b', 0.8),
+            ]
         }
+        
+        # Initialize services if available
+        if self.dice_engine is None:
+            try:
+                from app.services.dice_engine import dice_engine
+                self.dice_engine = dice_engine
+            except ImportError:
+                logger.warning("Dice engine not available for tool routing")
+        
+        if self.encounter_service is None:
+            try:
+                from app.services.encounter_service import encounter_service
+                self.encounter_service = encounter_service
+            except ImportError:
+                logger.warning("Encounter service not available for tool routing")
     
-    def detect_tools(self, message: str) -> List[ToolDetection]:
-        """Detect all potential tool usages in a message."""
-        detections = []
-        
-        # Detect dice rolls
-        detections.extend(self._detect_dice_rolls(message))
-        
-        # Detect file queries
-        detections.extend(self._detect_file_queries(message))
-        
-        # Detect knowledge searches
-        detections.extend(self._detect_knowledge_searches(message))
-        
-        # Sort by position in message
-        detections.sort(key=lambda d: d.start_pos)
-        
-        # Filter by confidence threshold
-        filtered_detections = []
-        for detection in detections:
-            threshold = self.confidence_thresholds.get(detection.tool_type, 0.5)
-            if detection.confidence >= threshold:
-                filtered_detections.append(detection)
-        
-        return filtered_detections
-    
-    def _detect_dice_rolls(self, message: str) -> List[ToolDetection]:
-        """Detect dice roll expressions in a message."""
-        detections = []
+    def detect_tools(self, message: str) -> List[DetectedTool]:
+        """Detect potential tool usage in a message."""
+        detected_tools = []
         message_lower = message.lower()
         
-        # Check for direct dice expressions
-        for pattern in self.DICE_PATTERNS:
-            for match in pattern.finditer(message):
-                dice_expr = match.group(1) if match.groups() else match.group(0)
-                
-                # Validate the dice expression
-                if self._is_valid_dice_expression(dice_expr):
-                    confidence = self._calculate_dice_confidence(match.group(0), message_lower)
-                    
-                    detection = ToolDetection(
-                        tool_type=ToolType.DICE_ROLL,
-                        confidence=confidence,
-                        extracted_text=match.group(0),
-                        parameters={'expression': dice_expr},
-                        start_pos=match.start(),
-                        end_pos=match.end()
-                    )
-                    detections.append(detection)
-        
-        # Check for ability/skill checks that should use d20
-        for ability in self.D20_ABILITIES:
-            ability_patterns = [
-                re.compile(rf'\b{re.escape(ability)}\s+(?:check|save|saving\s+throw|roll)\b', re.IGNORECASE),
-                re.compile(rf'\b(?:make\s+a|roll\s+a|do\s+a)\s+{re.escape(ability)}(?:\s+check)?\b', re.IGNORECASE),
-            ]
+        for tool_type, patterns in self.tool_patterns.items():
+            max_confidence = 0.0
+            best_match = ""
+            combined_params = {}
             
-            for pattern in ability_patterns:
-                for match in pattern.finditer(message):
-                    detection = ToolDetection(
-                        tool_type=ToolType.DICE_ROLL,
-                        confidence=0.8,
-                        extracted_text=match.group(0),
-                        parameters={
-                            'expression': '1d20',
-                            'suggested': True,
-                            'ability': ability,
-                            'check_type': 'ability_check'
-                        },
-                        start_pos=match.start(),
-                        end_pos=match.end()
+            for pattern, base_confidence in patterns:
+                matches = re.finditer(pattern, message_lower, re.IGNORECASE)
+                for match in matches:
+                    # Adjust confidence based on context
+                    confidence = self._adjust_confidence(
+                        base_confidence, match.group(), message_lower, tool_type
                     )
-                    detections.append(detection)
-        
-        # Special case for initiative
-        initiative_pattern = re.compile(r'\b(?:initiative|init)(?:\s+roll)?\b', re.IGNORECASE)
-        for match in initiative_pattern.finditer(message):
-            detection = ToolDetection(
-                tool_type=ToolType.DICE_ROLL,
-                confidence=0.9,
-                extracted_text=match.group(0),
-                parameters={
-                    'expression': '1d20',
-                    'suggested': True,
-                    'check_type': 'initiative'
-                },
-                start_pos=match.start(),
-                end_pos=match.end()
-            )
-            detections.append(detection)
-        
-        return detections
-    
-    def _detect_file_queries(self, message: str) -> List[ToolDetection]:
-        """Detect file query requests in a message."""
-        detections = []
-        
-        for pattern in self.FILE_QUERY_PATTERNS:
-            for match in pattern.finditer(message):
-                file_reference = match.group(1) if match.groups() else match.group(0)
-                confidence = 0.8 if any(ext in file_reference.lower() for ext in ['.pdf', '.md', '.yaml', '.yml', '.json']) else 0.7
-                
-                detection = ToolDetection(
-                    tool_type=ToolType.FILE_QUERY,
-                    confidence=confidence,
-                    extracted_text=match.group(0),
-                    parameters={'file_reference': file_reference},
-                    start_pos=match.start(),
-                    end_pos=match.end()
+                    
+                    if confidence > max_confidence:
+                        max_confidence = confidence
+                        best_match = match.group()
+                        
+                        # Extract parameters based on tool type
+                        if tool_type == ToolType.DICE_ROLL:
+                            combined_params.update(self._extract_dice_parameters(match.group(), message))
+                        elif tool_type == ToolType.ENCOUNTER_GENERATION:
+                            combined_params.update(self._extract_encounter_parameters(message))
+                        elif tool_type == ToolType.CHARACTER_CREATION:
+                            combined_params.update(self._extract_character_parameters(message))
+            
+            # Only include tools with sufficient confidence
+            if max_confidence >= 0.6:
+                detected_tool = DetectedTool(
+                    tool_type=tool_type,
+                    confidence=max_confidence,
+                    parameters=combined_params,
+                    original_text=best_match,
+                    suggested_action=self._generate_suggested_action(tool_type, combined_params)
                 )
-                detections.append(detection)
+                detected_tools.append(detected_tool)
         
-        return detections
+        # Sort by confidence (highest first)
+        detected_tools.sort(key=lambda x: x.confidence, reverse=True)
+        
+        return detected_tools
     
-    def _detect_knowledge_searches(self, message: str) -> List[ToolDetection]:
-        """Detect knowledge search requests in a message."""
-        detections = []
+    def _adjust_confidence(self, base_confidence: float, match_text: str, full_message: str, tool_type: ToolType) -> float:
+        """Adjust confidence based on context and specificity."""
+        confidence = base_confidence
         
-        for pattern in self.KNOWLEDGE_PATTERNS:
-            for match in pattern.finditer(message):
-                search_query = match.group(1) if match.groups() else match.group(0)
-                search_query = search_query.strip()
-                
-                # Skip very short or generic queries
-                if len(search_query) < 3 or search_query.lower() in ['it', 'that', 'this', 'what', 'how']:
-                    continue
-                
-                confidence = self._calculate_knowledge_confidence(search_query, message)
-                
-                detection = ToolDetection(
-                    tool_type=ToolType.KNOWLEDGE_SEARCH,
-                    confidence=confidence,
-                    extracted_text=match.group(0),
-                    parameters={'query': search_query},
-                    start_pos=match.start(),
-                    end_pos=match.end()
-                )
-                detections.append(detection)
+        # Boost confidence for more specific matches
+        if tool_type == ToolType.DICE_ROLL:
+            if re.search(r'\bd20\b', match_text):
+                confidence += 0.1  # D20 is very D&D specific
+            if re.search(r'\b(?:adv|dis|advantage|disadvantage)\b', full_message):
+                confidence += 0.1  # D&D 5e specific mechanics
         
-        return detections
+        elif tool_type == ToolType.ENCOUNTER_GENERATION:
+            if re.search(r'\b(?:cr|challenge rating)\s+\d+\b', full_message):
+                confidence += 0.1  # Specific CR mentioned
+            if re.search(r'\b(?:party|level|characters?)\b', full_message):
+                confidence += 0.05  # Party context
+            if re.search(r'\b(?:xp|experience)\s+(?:budget|points?)\b', full_message):
+                confidence += 0.15  # Technical encounter building terms
+        
+        # Reduce confidence for ambiguous contexts
+        if re.search(r'\b(?:not|don\'t|do not|avoid|prevent)\b.*' + re.escape(match_text), full_message):
+            confidence *= 0.3  # Negative context
+        
+        # Boost confidence for questions
+        if re.search(r'[?]', full_message):
+            confidence += 0.05
+        
+        # Boost confidence for imperative statements
+        if re.search(r'\b(?:please|can you|could you|would you)\b', full_message):
+            confidence += 0.05
+        
+        return min(1.0, confidence)
     
-    def _is_valid_dice_expression(self, expr: str) -> bool:
-        """Check if a string is a valid dice expression."""
-        if not expr:
-            return False
+    def _extract_dice_parameters(self, match_text: str, full_message: str) -> Dict[str, Any]:
+        """Extract parameters for dice rolling."""
+        params = {}
         
-        try:
-            result = self.dice_engine.validate_expression_syntax(expr)
-            return result['valid']
-        except Exception:
-            return False
+        # Look for explicit dice expressions
+        dice_match = re.search(r'(\d*)d(\d+)([+-]\d+)?(?:(adv|dis|dl\d*|dh\d*|kh\d*|kl\d*))?', match_text, re.IGNORECASE)
+        if dice_match:
+            params['expression'] = match_text
+            params['count'] = int(dice_match.group(1)) if dice_match.group(1) else 1
+            params['sides'] = int(dice_match.group(2))
+            if dice_match.group(3):
+                params['modifier'] = int(dice_match.group(3))
+            if dice_match.group(4):
+                params['roll_type'] = dice_match.group(4).lower()
+        
+        # Look for D&D ability checks
+        ability_match = re.search(r'\b(strength|str|dexterity|dex|constitution|con|intelligence|int|wisdom|wis|charisma|cha)\s+(check|save|saving throw)\b', full_message, re.IGNORECASE)
+        if ability_match:
+            params['ability'] = ability_match.group(1).lower()
+            params['check_type'] = ability_match.group(2).lower()
+            params['suggested_expression'] = '1d20'
+        
+        # Look for skill checks
+        skill_match = re.search(r'\b(acrobatics|athletics|deception|history|insight|intimidation|investigation|medicine|nature|perception|performance|persuasion|religion|sleight of hand|stealth|survival|arcana|animal handling)\s+check\b', full_message, re.IGNORECASE)
+        if skill_match:
+            params['skill'] = skill_match.group(1).lower()
+            params['check_type'] = 'skill'
+            params['suggested_expression'] = '1d20'
+        
+        return params
     
-    def _calculate_dice_confidence(self, matched_text: str, message_lower: str) -> float:
-        """Calculate confidence score for dice roll detection."""
-        confidence = 0.5
-        matched_lower = matched_text.lower()
+    def _extract_encounter_parameters(self, message: str) -> Dict[str, Any]:
+        """Extract parameters for encounter generation."""
+        params = {}
         
-        # Higher confidence for explicit dice patterns
-        if re.search(r'\d*d\d+', matched_lower):
-            confidence += 0.3
+        # Extract difficulty
+        difficulty_match = re.search(r'\b(easy|medium|hard|deadly)\b', message, re.IGNORECASE)
+        if difficulty_match:
+            params['difficulty'] = difficulty_match.group(1).lower()
         
-        # Context clues that increase confidence
-        dice_context_words = ['roll', 'dice', 'check', 'save', 'attack', 'damage', 'hit', 'throw']
-        for word in dice_context_words:
-            if word in message_lower:
-                confidence += 0.1
-                break
-        
-        # RPG-specific context
-        rpg_words = ['initiative', 'saving throw', 'ability check', 'advantage', 'disadvantage']
-        for phrase in rpg_words:
-            if phrase in message_lower:
-                confidence += 0.2
-                break
-        
-        return min(confidence, 1.0)
-    
-    def _calculate_knowledge_confidence(self, query: str, message: str) -> float:
-        """Calculate confidence score for knowledge search detection."""
-        confidence = 0.4
-        
-        # Longer queries are more likely to be knowledge searches
-        if len(query) > 10:
-            confidence += 0.2
-        
-        # RPG/D&D terms increase confidence
-        rpg_terms = [
-            'spell', 'magic', 'monster', 'creature', 'class', 'race', 'feat',
-            'ability', 'skill', 'armor', 'weapon', 'item', 'rule', 'mechanic',
-            'combat', 'dungeon', 'adventure', 'character', 'npc', 'campaign'
+        # Extract environment
+        env_patterns = [
+            (r'\b(?:in\s+(?:a|the)?\s*)?(forest|woods?|jungle)\b', 'forest'),
+            (r'\b(?:in\s+(?:a|the)?\s*)?(dungeon|cave|underground|cavern)\b', 'dungeon'),
+            (r'\b(?:in\s+(?:a|the)?\s*)?(mountain|hill)s?\b', 'mountains'),
+            (r'\b(?:in\s+(?:a|the)?\s*)?(swamp|marsh|bog)\b', 'swamp'),
+            (r'\b(?:in\s+(?:a|the)?\s*)?(desert)\b', 'desert'),
+            (r'\b(?:in\s+(?:a|the)?\s*)?(city|town|urban|street)\b', 'urban'),
+            (r'\b(?:on\s+(?:a|the)?\s*)?(coast|beach|shore)\b', 'coast'),
+            (r'\b(?:in\s+(?:a|the)?\s*)?(arctic|tundra|frozen)\b', 'arctic'),
+            (r'\b(?:in\s+(?:a|the)?\s*)?(grassland|plain|field)\b', 'grassland'),
         ]
         
-        query_lower = query.lower()
-        message_lower = message.lower()
-        
-        for term in rpg_terms:
-            if term in query_lower or term in message_lower:
-                confidence += 0.1
-        
-        # Question words indicate knowledge requests
-        question_words = ['what', 'how', 'where', 'when', 'why', 'who']
-        for word in question_words:
-            if word in message_lower:
-                confidence += 0.1
+        for pattern, env_type in env_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                params['environment'] = env_type
                 break
         
-        return min(confidence, 1.0)
-    
-    def execute_tool(self, detection: ToolDetection) -> ToolResult:
-        """Execute a detected tool and return the result."""
-        start_time = None
-        try:
-            import time
-            start_time = time.time()
-            
-            if detection.tool_type == ToolType.DICE_ROLL:
-                return self._execute_dice_roll(detection)
-            elif detection.tool_type == ToolType.FILE_QUERY:
-                return self._execute_file_query(detection)
-            elif detection.tool_type == ToolType.KNOWLEDGE_SEARCH:
-                return self._execute_knowledge_search(detection)
-            else:
-                return ToolResult(
-                    tool_type=detection.tool_type,
-                    success=False,
-                    result=None,
-                    error_message=f"Tool type {detection.tool_type} not implemented"
-                )
+        # Extract party information
+        party_size_match = re.search(r'\bparty\s+of\s+(\d+)\b', message, re.IGNORECASE)
+        if party_size_match:
+            params['party_size'] = int(party_size_match.group(1))
         
-        except Exception as e:
-            logger.error(f"Error executing tool {detection.tool_type}: {str(e)}")
+        # Alternative party size patterns
+        char_count_match = re.search(r'\b(\d+)\s+(?:characters?|pcs?|players?)\b', message, re.IGNORECASE)
+        if char_count_match and 'party_size' not in params:
+            params['party_size'] = int(char_count_match.group(1))
+        
+        # Extract party level
+        level_patterns = [
+            r'\b(?:level|lvl)\s+(\d+)\b',
+            r'\b(\d+)(?:st|nd|rd|th)\s+level\b',
+            r'\blevel\s+(\d+)\s+(?:party|characters?|pcs?)\b'
+        ]
+        
+        for pattern in level_patterns:
+            level_match = re.search(pattern, message, re.IGNORECASE)
+            if level_match:
+                params['party_level'] = int(level_match.group(1))
+                break
+        
+        # Extract CR if specified
+        cr_match = re.search(r'\b(?:challenge rating|cr)\s+(\d+(?:\.\d+)?|\d+/\d+)\b', message, re.IGNORECASE)
+        if cr_match:
+            params['target_cr'] = cr_match.group(1)
+        
+        return params
+    
+    def _extract_character_parameters(self, message: str) -> Dict[str, Any]:
+        """Extract parameters for character creation."""
+        params = {}
+        
+        # Extract race
+        races = ['human', 'elf', 'dwarf', 'halfling', 'dragonborn', 'gnome', 'half-elf', 'half-orc', 'tiefling']
+        for race in races:
+            if re.search(rf'\b{race}\b', message, re.IGNORECASE):
+                params['race'] = race
+                break
+        
+        # Extract class
+        classes = ['fighter', 'wizard', 'rogue', 'cleric', 'ranger', 'paladin', 'barbarian', 'bard', 'druid', 'monk', 'sorcerer', 'warlock']
+        for char_class in classes:
+            if re.search(rf'\b{char_class}\b', message, re.IGNORECASE):
+                params['character_class'] = char_class
+                break
+        
+        # Extract ability score method
+        if re.search(r'\bpoint buy\b', message, re.IGNORECASE):
+            params['ability_method'] = 'point_buy'
+        elif re.search(r'\bstandard array\b', message, re.IGNORECASE):
+            params['ability_method'] = 'standard_array'
+        elif re.search(r'\broll(?:ed)?\s+stats?\b', message, re.IGNORECASE):
+            params['ability_method'] = 'rolled'
+        
+        # Extract level
+        level_match = re.search(r'\b(?:level|lvl)\s+(\d+)\b', message, re.IGNORECASE)
+        if level_match:
+            params['level'] = int(level_match.group(1))
+        
+        return params
+    
+    def _generate_suggested_action(self, tool_type: ToolType, params: Dict[str, Any]) -> str:
+        """Generate a suggested action description for the detected tool."""
+        if tool_type == ToolType.DICE_ROLL:
+            if 'expression' in params:
+                return f"Roll {params['expression']}"
+            elif 'ability' in params:
+                return f"Roll {params['ability']} {params.get('check_type', 'check')}"
+            elif 'skill' in params:
+                return f"Roll {params['skill']} check"
+            else:
+                return "Roll dice"
+        
+        elif tool_type == ToolType.ENCOUNTER_GENERATION:
+            parts = ["Generate"]
+            if 'difficulty' in params:
+                parts.append(params['difficulty'])
+            parts.append("encounter")
+            if 'environment' in params:
+                parts.append(f"in {params['environment']}")
+            if 'party_size' in params and 'party_level' in params:
+                parts.append(f"for {params['party_size']} level {params['party_level']} characters")
+            elif 'party_size' in params:
+                parts.append(f"for {params['party_size']} characters")
+            elif 'party_level' in params:
+                parts.append(f"for level {params['party_level']} party")
+            
+            return " ".join(parts)
+        
+        elif tool_type == ToolType.CHARACTER_CREATION:
+            parts = ["Create"]
+            if 'race' in params and 'character_class' in params:
+                parts.append(f"{params['race']} {params['character_class']}")
+            elif 'race' in params:
+                parts.append(f"{params['race']} character")
+            elif 'character_class' in params:
+                parts.append(f"{params['character_class']} character")
+            else:
+                parts.append("character")
+            
+            if 'level' in params:
+                parts.append(f"(level {params['level']})")
+            
+            return " ".join(parts)
+        
+        return f"Execute {tool_type.value}"
+    
+    def execute_tools(self, detected_tools: List[DetectedTool]) -> List[ToolResult]:
+        """Execute detected tools and return results."""
+        results = []
+        
+        for tool in detected_tools:
+            try:
+                if tool.tool_type == ToolType.DICE_ROLL:
+                    result = self._execute_dice_roll(tool)
+                elif tool.tool_type == ToolType.ENCOUNTER_GENERATION:
+                    result = self._execute_encounter_generation(tool)
+                elif tool.tool_type == ToolType.CHARACTER_CREATION:
+                    result = self._execute_character_creation(tool)
+                else:
+                    result = ToolResult(
+                        tool_type=tool.tool_type,
+                        success=False,
+                        error_message=f"Tool type {tool.tool_type.value} not implemented"
+                    )
+                
+                results.append(result)
+                
+            except Exception as e:
+                logger.error(f"Error executing {tool.tool_type.value}: {e}")
+                results.append(ToolResult(
+                    tool_type=tool.tool_type,
+                    success=False,
+                    error_message=str(e)
+                ))
+        
+        return results
+    
+    def _execute_dice_roll(self, tool: DetectedTool) -> ToolResult:
+        """Execute a dice roll tool."""
+        if not self.dice_engine:
             return ToolResult(
-                tool_type=detection.tool_type,
+                tool_type=tool.tool_type,
                 success=False,
-                result=None,
-                error_message=str(e)
+                error_message="Dice engine not available"
             )
         
-        finally:
-            if start_time:
-                execution_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-    
-    def _execute_dice_roll(self, detection: ToolDetection) -> ToolResult:
-        """Execute a dice roll tool."""
-        expression = detection.parameters.get('expression', '1d20')
-        
         try:
+            params = tool.parameters
+            
+            # Determine what to roll
+            if 'expression' in params:
+                expression = params['expression']
+            elif 'ability' in params or 'skill' in params:
+                expression = params.get('suggested_expression', '1d20')
+            else:
+                expression = '1d20'  # Default
+            
+            # Execute the roll
             result = self.dice_engine.execute_roll(expression)
             
+            # Format the result
+            if 'ability' in params:
+                formatted = f"{params['ability'].title()} {params.get('check_type', 'check')}: {result.total} [{expression}]"
+            elif 'skill' in params:
+                formatted = f"{params['skill'].title()} check: {result.total} [{expression}]"
+            else:
+                formatted = f"Roll: {result.total} [{expression}]"
+            
+            # Add breakdown if available
+            if hasattr(result, 'get_breakdown'):
+                breakdown = result.get_breakdown()
+                if 'dice_groups' in breakdown and breakdown['dice_groups']:
+                    dice_details = []
+                    for group in breakdown['dice_groups']:
+                        if 'kept_rolls' in group:
+                            dice_results = [str(roll['result']) for roll in group['kept_rolls']]
+                            dice_details.append(f"({', '.join(dice_results)})")
+                    if dice_details:
+                        formatted += f" Dice: {', '.join(dice_details)}"
+            
             return ToolResult(
-                tool_type=ToolType.DICE_ROLL,
-                success=result.is_valid,
-                result=result.get_breakdown(),
-                error_message=result.error_message if not result.is_valid else None
+                tool_type=tool.tool_type,
+                success=True,
+                result=result,
+                formatted_result=formatted
             )
-        
+            
         except Exception as e:
             return ToolResult(
-                tool_type=ToolType.DICE_ROLL,
+                tool_type=tool.tool_type,
                 success=False,
-                result=None,
                 error_message=f"Dice roll failed: {str(e)}"
             )
     
-    def _execute_file_query(self, detection: ToolDetection) -> ToolResult:
-        """Execute a file query tool."""
-        # Placeholder - would integrate with file system service
-        file_reference = detection.parameters.get('file_reference', '')
+    def _execute_encounter_generation(self, tool: DetectedTool) -> ToolResult:
+        """Execute an encounter generation tool."""
+        if not self.encounter_service:
+            return ToolResult(
+                tool_type=tool.tool_type,
+                success=False,
+                error_message="Encounter service not available"
+            )
         
-        return ToolResult(
-            tool_type=ToolType.FILE_QUERY,
-            success=False,
-            result=None,
-            error_message="File query not implemented yet"
-        )
-    
-    def _execute_knowledge_search(self, detection: ToolDetection) -> ToolResult:
-        """Execute a knowledge search tool."""
-        # Placeholder - would integrate with knowledge service
-        query = detection.parameters.get('query', '')
-        
-        return ToolResult(
-            tool_type=ToolType.KNOWLEDGE_SEARCH,
-            success=False,
-            result=None,
-            error_message="Knowledge search not implemented yet"
-        )
-    
-    def process_message(self, message: str, execute_tools: bool = True) -> MessageWithTools:
-        """Process a message, detect tools, and optionally execute them."""
-        # Detect all tools in the message
-        detections = self.detect_tools(message)
-        
-        # Initialize result
-        result = MessageWithTools(
-            original_message=message,
-            cleaned_message=message,
-            detected_tools=detections,
-            tool_results=[],
-            has_tools=len(detections) > 0
-        )
-        
-        if execute_tools and detections:
-            # Execute each detected tool
-            for detection in detections:
-                tool_result = self.execute_tool(detection)
-                result.tool_results.append(tool_result)
+        try:
+            from app.services.encounter_service import PartyComposition, EncounterDifficulty, Environment
             
-            # Clean the message by replacing tool expressions with results
-            result.cleaned_message = self._clean_message_with_results(message, detections, result.tool_results)
-        
-        return result
+            params = tool.parameters
+            
+            # Set defaults
+            party_size = params.get('party_size', 4)
+            party_level = params.get('party_level', 5)
+            difficulty = params.get('difficulty', 'medium')
+            environment = params.get('environment', 'dungeon')
+            
+            # Convert to enums
+            try:
+                difficulty_enum = EncounterDifficulty(difficulty)
+            except ValueError:
+                difficulty_enum = EncounterDifficulty.MEDIUM
+            
+            try:
+                environment_enum = Environment(environment)
+            except ValueError:
+                environment_enum = Environment.DUNGEON
+            
+            # Create party composition
+            party_composition = PartyComposition(
+                party_size=party_size,
+                party_level=party_level
+            )
+            
+            # Generate encounter
+            encounter = self.encounter_service.generate_encounter(
+                party_composition=party_composition,
+                difficulty=difficulty_enum,
+                environment=environment_enum
+            )
+            
+            # Format the result
+            monsters_text = []
+            for em in encounter.monsters:
+                if em.count == 1:
+                    monsters_text.append(f"1 {em.monster.name}")
+                else:
+                    monsters_text.append(f"{em.count} {em.monster.name}s")
+            
+            formatted = f"**{difficulty.title()} {environment.title()} Encounter** for {party_size} level {party_level} characters:\n"
+            formatted += f"• **Monsters**: {', '.join(monsters_text)}\n"
+            formatted += f"• **XP**: {encounter.total_xp} total, {encounter.adjusted_xp} adjusted\n"
+            
+            if encounter.tactical_notes:
+                formatted += f"• **Tactics**: {encounter.tactical_notes}\n"
+            
+            if encounter.environmental_features:
+                formatted += f"• **Environment**: {', '.join(encounter.environmental_features[:2])}"
+            
+            return ToolResult(
+                tool_type=tool.tool_type,
+                success=True,
+                result=encounter,
+                formatted_result=formatted
+            )
+            
+        except Exception as e:
+            return ToolResult(
+                tool_type=tool.tool_type,
+                success=False,
+                error_message=f"Encounter generation failed: {str(e)}"
+            )
     
-    def _clean_message_with_results(self, message: str, detections: List[ToolDetection], results: List[ToolResult]) -> str:
-        """Clean the message by replacing tool expressions with their results."""
+    def _execute_character_creation(self, tool: DetectedTool) -> ToolResult:
+        """Execute a character creation tool."""
+        try:
+            params = tool.parameters
+            
+            # For now, return a formatted suggestion
+            # TODO: Integrate with character service when available
+            
+            race = params.get('race', 'human').title()
+            char_class = params.get('character_class', 'fighter').title()
+            level = params.get('level', 1)
+            
+            formatted = f"**Character Creation Suggestion**:\n"
+            formatted += f"• **Race**: {race}\n"
+            formatted += f"• **Class**: {char_class}\n"
+            formatted += f"• **Level**: {level}\n"
+            
+            if 'ability_method' in params:
+                formatted += f"• **Ability Scores**: {params['ability_method'].replace('_', ' ').title()}\n"
+            
+            formatted += "\nUse the character creation wizard API endpoints to create this character."
+            
+            return ToolResult(
+                tool_type=tool.tool_type,
+                success=True,
+                result=params,
+                formatted_result=formatted
+            )
+            
+        except Exception as e:
+            return ToolResult(
+                tool_type=tool.tool_type,
+                success=False,
+                error_message=f"Character creation failed: {str(e)}"
+            )
+    
+    def process_message(self, message: str, execute_tools: bool = True) -> ProcessedMessage:
+        """Process a message through the complete tool detection and execution pipeline."""
+        # Detect tools
+        detected_tools = self.detect_tools(message)
+        
+        # Calculate confidence scores
+        confidence_scores = {
+            tool.tool_type.value: tool.confidence 
+            for tool in detected_tools
+        }
+        
+        # Execute tools if requested
+        tool_results = []
+        if execute_tools and detected_tools:
+            tool_results = self.execute_tools(detected_tools)
+        
+        # Clean the message (remove tool-specific text for LLM processing)
+        cleaned_message = self._clean_message_for_llm(message, detected_tools)
+        
+        return ProcessedMessage(
+            original_message=message,
+            cleaned_message=cleaned_message,
+            detected_tools=detected_tools,
+            tool_results=tool_results,
+            confidence_scores=confidence_scores,
+            has_tools=len(detected_tools) > 0
+        )
+    
+    def _clean_message_for_llm(self, message: str, detected_tools: List[DetectedTool]) -> str:
+        """Clean the message by removing or replacing tool-specific expressions."""
         cleaned = message
         
-        # Process replacements from end to start to maintain string positions
-        for detection, result in reversed(list(zip(detections, results))):
-            if result.success and detection.tool_type == ToolType.DICE_ROLL:
-                # Replace dice expression with result
-                breakdown = result.result
-                total = breakdown.get('total', 0)
-                expression = breakdown.get('expression', '')
-                
-                replacement = f"**{expression}** → **{total}**"
-                
-                # Add critical hit/failure indicators
-                if any(group.get('die_type') == 'd20' for group in breakdown.get('dice_groups', [])):
-                    for group in breakdown.get('dice_groups', []):
-                        if group.get('die_type') == 'd20':
-                            for roll in group.get('rolls', []):
-                                if roll.get('result') == 20:
-                                    replacement += " 🎯"  # Critical hit
-                                elif roll.get('result') == 1:
-                                    replacement += " 💥"  # Critical failure
-                
-                cleaned = cleaned[:detection.start_pos] + replacement + cleaned[detection.end_pos:]
-            
-            elif not result.success:
-                # Mark failed tool executions
-                cleaned = cleaned[:detection.start_pos] + f"~~{detection.extracted_text}~~ ❌" + cleaned[detection.end_pos:]
+        # For now, keep the original message intact
+        # Future enhancement: replace dice expressions with results, etc.
         
         return cleaned
-    
-    def get_tool_suggestions(self, message: str) -> List[Dict[str, Any]]:
-        """Get tool suggestions based on message content."""
-        suggestions = []
-        
-        detections = self.detect_tools(message)
-        
-        for detection in detections:
-            if detection.tool_type == ToolType.DICE_ROLL:
-                expression = detection.parameters.get('expression', '1d20')
-                suggestions.append({
-                    'type': 'dice_roll',
-                    'expression': expression,
-                    'description': f"Roll {expression}",
-                    'confidence': detection.confidence
-                })
-            
-            elif detection.tool_type == ToolType.KNOWLEDGE_SEARCH:
-                query = detection.parameters.get('query', '')
-                suggestions.append({
-                    'type': 'knowledge_search',
-                    'query': query,
-                    'description': f"Search for: {query}",
-                    'confidence': detection.confidence
-                })
-        
-        return suggestions
 
 
 # Global tool router instance

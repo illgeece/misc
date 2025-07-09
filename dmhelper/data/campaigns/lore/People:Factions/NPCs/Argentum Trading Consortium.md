@@ -1,0 +1,1 @@
+**The largest shipping and distribution company in the tower, with an overwhelming monopoly on inter-floor trade due to their agreements with the owners of most floors and the administrators that allow them to use and monitor most of the modes of transportation between the floors.**

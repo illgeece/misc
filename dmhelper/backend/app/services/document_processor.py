@@ -223,10 +223,16 @@ class DocumentProcessor:
         
         if len(words) <= self.chunk_size:
             # Text is small enough to be a single chunk
+            path_hash = hashlib.md5(file_path.encode()).hexdigest()[:6]
+            if page_number is not None:
+                cid = f"{Path(file_path).stem}_{path_hash}_p{page_number}_full"
+            else:
+                cid = f"{Path(file_path).stem}_{path_hash}_full"
+
             chunk = DocumentChunk(
                 content=text,
                 source_file=file_path,
-                chunk_id="",
+                chunk_id=cid,
                 page_number=page_number
             )
             chunks.append(chunk)
@@ -235,15 +241,22 @@ class DocumentProcessor:
             start = 0
             chunk_num = 0
             
+            path_hash = hashlib.md5(file_path.encode()).hexdigest()[:6]
             while start < len(words):
                 end = min(start + self.chunk_size, len(words))
                 chunk_words = words[start:end]
                 chunk_text = " ".join(chunk_words)
                 
+                # Ensure chunk IDs are unique across the entire collection
+                if page_number is not None:
+                    cid = f"{Path(file_path).stem}_{path_hash}_p{page_number}_{chunk_num}"
+                else:
+                    cid = f"{Path(file_path).stem}_{path_hash}_{chunk_num}"
+                
                 chunk = DocumentChunk(
                     content=chunk_text,
                     source_file=file_path,
-                    chunk_id=f"{Path(file_path).stem}_chunk_{chunk_num}",
+                    chunk_id=cid,
                     page_number=page_number,
                     metadata={"chunk_index": chunk_num}
                 )

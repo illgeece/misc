@@ -1,0 +1,5 @@
+Formed after the other two kingdoms of various powerful human families who all claim ties back to the original Denea, but their claims are dubious as the records of that time are not comprehensive at all. The city of Celeus was re established as the capital of Sapin and Denea in general. 
+- Celeus: The oldest human settlement in history, started in the first era during the Slave Uprising. The city had been fought over by countless groups during the 666 year night, destroying a lot of its former splendour and leaving only a few buildings from that time. 
+- Xyrus: The Floating City. Floats around the 49th floor supported by a giant core of mana conductive rock in the center of the crust of the city. It can be approached by a teleportation gate that is maintained by the city guard constantly. Houses the Academy, which is its main drawing point as a hub of scholars and one of the premier destinations for the greatest minds in the tower. 
+- Etistin: Trading hub of the kingdom, strategically located in Etistin Bay, which eats into an outcropping surrounded on three sides by the Azure Ocean.
+- New Ilia:

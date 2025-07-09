@@ -1,0 +1,17 @@
+**Territories**: controlled by Zahard and the families. 
+- Zahard’s: Eden: The city of perfection. Contains all of the greatest warriors of the Zarian empire after they complete their service, basically a heaven for people who are good to Zahard. Actually empty as he kills everyone after they are no longer useful. 
+- Gustangs:
+	- Centoria:    
+	- Eurasia:
+- Edahns:
+	- Aquila:
+	- Sephia:
+- Yurin’s:
+	- Gondra:
+	- Morana:
+- Traumerei’s:
+	- The Root:
+	- Selena:
+- Yirang’s: 
+	- Parasido:
+	- Riviera:

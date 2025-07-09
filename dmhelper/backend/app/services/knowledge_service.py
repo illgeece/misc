@@ -109,7 +109,8 @@ class KnowledgeService:
                 "file": file_path,
                 "chunks_added": chunks_added,
                 "chunks_replaced": deleted_chunks,
-                "processing_time_ms": processed_doc.processing_time_ms
+                "processing_time_ms": processed_doc.processing_time_ms,
+                "action": "indexed"
             }
             
         except Exception as e:
@@ -118,7 +119,8 @@ class KnowledgeService:
                 "status": "error",
                 "message": f"Failed to index file: {str(e)}",
                 "file": file_path,
-                "chunks_added": 0
+                "chunks_added": 0,
+                "action": "failed"
             }
     
     async def search_knowledge(

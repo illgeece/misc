@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from typing import List, Optional
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -34,7 +35,9 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="all-MiniLM-L6-v2", env="EMBEDDING_MODEL")
     
     # File System
-    campaign_root_dir: str = Field(default="./data/campaigns", env="CAMPAIGN_ROOT_DIR")
+    # Determine project root (3 levels up from this file: core -> app -> backend -> project root)
+    _default_campaign_root = Path(__file__).resolve().parents[3] / "data" / "campaigns"
+    campaign_root_dir: str = Field(default_factory=lambda: str(Settings._default_campaign_root), env="CAMPAIGN_ROOT_DIR")
     watch_file_changes: bool = Field(default=True, env="WATCH_FILE_CHANGES")
     max_file_size_mb: int = Field(default=50, env="MAX_FILE_SIZE_MB")
     supported_file_types: List[str] = Field(
@@ -61,6 +64,21 @@ class Settings(BaseSettings):
     
     # Testing
     testing: bool = Field(default=False, env="TESTING")
+    
+    def __init__(self, **values):
+        super().__init__(**values)
+        # Auto-correct common mis-configuration that uses backend/data/campaigns
+        project_root = Path(__file__).resolve().parents[3]
+        canonical = project_root / "data" / "campaigns"
+        backend_path = project_root / "backend" / "data" / "campaigns"
+
+        # If env points to backend/data/campaigns but canonical path exists, switch
+        try:
+            if Path(self.campaign_root_dir).resolve() == backend_path.resolve() and canonical.exists():
+                self.campaign_root_dir = str(canonical)
+        except Exception:
+            # Any resolution errors – ignore and keep existing path
+            pass
     
     @property
     def campaign_root(self) -> str:

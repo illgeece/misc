@@ -1,0 +1,1 @@
+“The Wild Hunt” : God of Animals. Said to lead a flock of the most powerful monsters called the Wild Hunt around the tower challenging and defeating the strongest monsters.
