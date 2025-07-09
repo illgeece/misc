@@ -1,7 +1,7 @@
-# DM Helper - AI Dungeon Master's Companion
+# DM Helper - AI  Companion
 
-An intelligent assistant for Dungeon Masters that combines conversational AI with specialized D&D tools and knowledge management.
-
+An intelligent assistant for Dungeon Masters that combines conversational AI with specialized D&D tools and knowledge management. My first foray into AI agent coding. Works, but too huge and messy to try and fix and improve. 
+No longer in use. 
 ## Features
 
 - **Conversational AI**: Natural language Q&A about rules, lore, NPCs, and items
